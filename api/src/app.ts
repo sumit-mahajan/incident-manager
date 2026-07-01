@@ -1,9 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import type { Router } from 'express';
 import { errorHandler } from './middleware/errorHandler';
 
-export function createApp(): express.Application {
+export interface AppRouters {
+  incidents: Router;
+  users: Router;
+  groups: Router;
+}
+
+export function createApp(routers: AppRouters): express.Application {
   const app = express();
 
   app.use(helmet());
@@ -14,7 +21,9 @@ export function createApp(): express.Application {
     res.json({ status: 'ok' });
   });
 
-  // Feature routes mounted here in Step 5
+  app.use('/incidents', routers.incidents);
+  app.use('/users', routers.users);
+  app.use('/groups', routers.groups);
 
   app.use(errorHandler);
 

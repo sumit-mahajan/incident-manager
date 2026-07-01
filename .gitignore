@@ -24,3 +24,4 @@ Thumbs.db
 # Docs & assistant instructions — excluded from repo
 docs/
 CLAUDE.md
+.claude/

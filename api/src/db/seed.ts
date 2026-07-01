@@ -8,6 +8,13 @@ async function seed(): Promise<void> {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const db = drizzle(pool, { schema });
 
+  const existing = await pool.query('SELECT 1 FROM groups LIMIT 1');
+  if (existing.rowCount && existing.rowCount > 0) {
+    console.log('Seed skipped — groups table already has data.');
+    await pool.end();
+    return;
+  }
+
   const nextKey = async (): Promise<string> => {
     const result = await pool.query(
       `SELECT 'INC-' || LPAD(nextval('incident_key_seq')::text, 4, '0') AS key`

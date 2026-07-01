@@ -6,34 +6,53 @@ A lightweight incident management application: REST API + web UI for raising, tr
 
 ## Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for local run)
-- [Node.js 22+](https://nodejs.org/) (for frontend dev server)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Postgres only)
+- [Node.js 22+](https://nodejs.org/) (runs the API and web dev servers natively)
 - A [Google AI](https://ai.google.dev/) API key (`GEMINI_API_KEY`)
 
 ---
 
-## Local Run (one command)
+## Local Run
+
+The API and web app run natively on your machine for fast reloads. Docker Compose is used
+only to provide Postgres.
 
 ```bash
-# 1. Copy and fill in secrets
+# 1. Start Postgres
+docker compose up -d db
+
+# 2. Copy and fill in secrets
 cp api/.env.example api/.env
 # Edit api/.env — set GEMINI_API_KEY to your key
 
-# 2. Start API + Postgres
-docker-compose up --build
+# 3. Install deps, run migrations, seed the database (first run only — seeding is
+#    skipped automatically if data already exists)
+cd api
+npm install
+npm run db:migrate
+npm run db:seed
 
-# 3. Run migrations + seed (first time only, in a second terminal)
-cd api && npm install && npm run db:migrate && npm run db:seed
-
-# 4. Start the frontend dev server (in a third terminal)
-cd web && npm install && npm run dev
+# 4. Start the API (in this terminal)
+npm run dev
 ```
+
+In a second terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+DB data persists across `docker compose down` / `up` via a named volume; to start over from a
+truly empty database, run `docker compose down -v`.
 
 - API: http://localhost:3001
 - Frontend: http://localhost:5173
 - Health check: http://localhost:3001/health
 
-The Vite dev server proxies `/api/*` → `http://localhost:3001` so no CORS config is needed in development.
+The Vite dev server proxies `/api/*` → `http://localhost:3001` so no CORS config is needed in
+development.
 
 ---
 
