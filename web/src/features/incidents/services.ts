@@ -1,5 +1,5 @@
 import { api } from '../../lib/apiClient';
-import type { Incident, Paginated, Group, User, IncidentSuggestion, IncidentDraft } from '../../types';
+import type { Incident, Paginated, Group, User, IncidentSuggestion, IncidentDraft, IncidentComment } from '../../types';
 
 export interface IncidentFilters {
   severity?: string;
@@ -48,6 +48,10 @@ export const incidentService = {
 
   intake: (text: string) =>
     api.post<{ parsed: IncidentDraft }>('/incidents/intake', { text }),
+
+  listComments: (id: string) => api.get<IncidentComment[]>(`/incidents/${id}/comments`),
+
+  addComment: (id: string, body: string) => api.post<IncidentComment>(`/incidents/${id}/comments`, { body }),
 };
 
 export const userService = {

@@ -98,6 +98,27 @@ export function useGenerateRootCause(id: string) {
   });
 }
 
+export function useComments(incidentId: string) {
+  return useQuery({
+    queryKey: ['comments', incidentId],
+    queryFn: () => incidentService.listComments(incidentId),
+    enabled: !!incidentId,
+  });
+}
+
+export function useAddComment(incidentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: string) => incidentService.addComment(incidentId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['comments', incidentId] });
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err, 'Failed to post comment'));
+    },
+  });
+}
+
 export function useUsers() {
   return useQuery({
     queryKey: ['users'],

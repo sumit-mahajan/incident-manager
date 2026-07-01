@@ -114,43 +114,41 @@ export function CreateIncidentPage() {
       )}
 
       {/* Natural-language intake */}
-      {
-        // <div className="mb-6 p-4 bg-surface border border-surface-border rounded-lg">
-        //   <label className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-1.5">
-        //     <Wand2 size={14} className="text-accent" />
-        //     Describe it in plain English
-        //   </label>
-        //   <textarea
-        //     value={intakeText}
-        //     onChange={(e) => setIntakeText(e.target.value)}
-        //     placeholder="e.g. nightly DB refresh failed in prod, customers can't see balances"
-        //     rows={2}
-        //     className="w-full px-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground placeholder:text-muted focus:outline-none focus:border-accent transition-colors resize-y"
-        //   />
-        //   <div className="mt-2 flex items-center gap-2">
-        //     <button
-        //       type="button"
-        //       onClick={handleIntake}
-        //       disabled={intakeText.trim().length < MIN_INTAKE_TEXT || intake.isPending}
-        //       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        //     >
-        //       <Sparkles size={13} />
-        //       {intake.isPending ? 'Parsing…' : 'Parse with AI'}
-        //     </button>
-        //     {intake.isError && (
-        //       <span className="text-xs text-destructive">
-        //         Could not parse that. Please fill the form manually below.
-        //       </span>
-        //     )}
-        //   </div>
-        //   {intakeParsed && (
-        //     <p className="mt-2 text-xs text-accent">
-        //       Parsed into the form below — review the fields and confirm by clicking Create
-        //       Incident.
-        //     </p>
-        //   )}
-        // </div>
-      }
+      <div className="mb-6 p-4 bg-surface border border-surface-border rounded-lg">
+        <label className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-1.5">
+          <Wand2 size={14} className="text-accent" />
+          Describe it in plain English
+        </label>
+        <textarea
+          value={intakeText}
+          onChange={(e) => setIntakeText(e.target.value)}
+          placeholder="e.g. nightly DB refresh failed in prod, customers can't see balances"
+          rows={2}
+          className="w-full px-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground placeholder:text-muted focus:outline-none focus:border-accent transition-colors resize-y"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleIntake}
+            disabled={intakeText.trim().length < MIN_INTAKE_TEXT || intake.isPending}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Sparkles size={13} />
+            {intake.isPending ? 'Parsing…' : 'Parse with AI'}
+          </button>
+          {intake.isError && (
+            <span className="text-xs text-destructive">
+              Could not parse that. Please fill the form manually below.
+            </span>
+          )}
+        </div>
+        {intakeParsed && (
+          <p className="mt-2 text-xs text-accent">
+            Parsed into the form below — review the fields and confirm by clicking Create
+            Incident.
+          </p>
+        )}
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Title */}

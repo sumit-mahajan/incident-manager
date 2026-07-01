@@ -17,6 +17,8 @@ export function incidentRoutes(service: IncidentService, auth: RequestHandler): 
   router.patch('/:id/assignee', auth, ctrl.updateAssignee);
   router.post('/:id/summary', auth, ctrl.generateSummary);
   router.post('/:id/root-cause', auth, ctrl.generateRootCause);
+  router.get('/:id/comments', ctrl.listComments);
+  router.post('/:id/comments', auth, ctrl.createComment);
 
   return router;
 }

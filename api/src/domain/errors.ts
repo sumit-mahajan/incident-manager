@@ -40,8 +40,8 @@ export class ValidationError extends Error {
 export class IllegalTransitionError extends Error {
   readonly code = 'ILLEGAL_TRANSITION' as const;
   readonly status = 409;
-  constructor(from: string, to: string) {
-    super(`Cannot transition from ${from} to ${to}`);
+  constructor(from: string, to: string, reason?: string) {
+    super(reason ?? `Cannot transition from ${from} to ${to}`);
     this.name = 'IllegalTransitionError';
   }
 }

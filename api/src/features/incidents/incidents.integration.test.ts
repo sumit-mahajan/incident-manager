@@ -6,13 +6,14 @@ import { userRoutes } from '../users/userRoutes';
 import { groupRoutes } from '../groups/groupRoutes';
 import { resolveCurrentUser } from '../../middleware/auth';
 import { IncidentService } from './incidentService';
-import type { UserRepository, GroupRepository, IncidentRepository, LlmClient } from '../../domain/ports';
-import type { Incident, User, Group } from '../../domain/types';
+import type { UserRepository, GroupRepository, IncidentRepository, LlmClient, CommentRepository } from '../../domain/ports';
+import type { Incident, IncidentComment, User, Group } from '../../domain/types';
 import { AiUnavailableError, ParseFailedError } from '../../domain/errors';
 
 const GROUP_ID = '00000000-0000-0000-0000-000000000001';
 const INC_ID = '00000000-0000-0000-0000-000000000010';
 const USER_ID = '00000000-0000-0000-0000-000000000100';
+const COMMENT_ID = '00000000-0000-0000-0000-000000001000';
 
 const seedUser: User = {
   userId: USER_ID,
@@ -47,10 +48,19 @@ const seedIncident: Incident = {
   updatedAt: new Date(),
 };
 
+const seedComment: IncidentComment = {
+  commentId: COMMENT_ID,
+  incidentId: INC_ID,
+  authorId: USER_ID,
+  body: 'Looking into this now.',
+  createdAt: new Date(),
+};
+
 function buildApp(
   incidentOverrides: Partial<IncidentRepository> = {},
   groupOverrides: Partial<GroupRepository> = {},
   llmOverrides: Partial<LlmClient> = {},
+  commentOverrides: Partial<CommentRepository> = {},
 ) {
   const userRepo: UserRepository = {
     findById: vi.fn().mockResolvedValue(seedUser),
@@ -88,8 +98,14 @@ function buildApp(
     ...llmOverrides,
   };
 
+  const commentRepo: CommentRepository = {
+    create: vi.fn().mockResolvedValue(seedComment),
+    findByIncidentId: vi.fn().mockResolvedValue([seedComment]),
+    ...commentOverrides,
+  };
+
   const auth = resolveCurrentUser(userRepo);
-  const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+  const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
 
   return createApp({
     incidents: incidentRoutes(svc, auth),
@@ -140,8 +156,12 @@ describe('Auth middleware', () => {
       suggestRootCause: vi.fn(),
       parseIntake: vi.fn(),
     };
+    const commentRepo: CommentRepository = {
+      create: vi.fn(),
+      findByIncidentId: vi.fn(),
+    };
     const auth = resolveCurrentUser(userRepo);
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     const app = createApp({
       incidents: incidentRoutes(svc, auth),
       users: userRoutes(userRepo),
@@ -221,7 +241,7 @@ describe('GET /incidents/:id', () => {
 
 describe('PATCH /incidents/:id/status', () => {
   it('transitions status and returns updated incident', async () => {
-    const app = buildApp();
+    const app = buildApp({ findById: vi.fn().mockResolvedValue({ ...seedIncident, assigneeId: USER_ID }) });
     const res = await request(app)
       .patch(`/incidents/${INC_ID}/status`)
       .set('X-User-Id', USER_ID)
@@ -238,6 +258,17 @@ describe('PATCH /incidents/:id/status', () => {
       .send({ status: 'Closed' });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('returns 409 when moving an unassigned incident to InProgress', async () => {
+    const app = buildApp({ findById: vi.fn().mockResolvedValue({ ...seedIncident, assigneeId: null }) });
+    const res = await request(app)
+      .patch(`/incidents/${INC_ID}/status`)
+      .set('X-User-Id', USER_ID)
+      .send({ status: 'InProgress' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('ILLEGAL_TRANSITION');
+    expect(res.body.error.message).toMatch(/must be assigned/i);
   });
 
   it('returns 403 when user is neither assignee nor group member', async () => {
@@ -441,5 +472,73 @@ describe('PATCH /incidents/:id/assignee', () => {
       .send({ assigneeId: USER_ID });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+});
+
+describe('GET /incidents/:id/comments', () => {
+  it('returns the comment list without requiring auth', async () => {
+    const app = buildApp();
+    const res = await request(app).get(`/incidents/${INC_ID}/comments`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([expect.objectContaining({ commentId: COMMENT_ID, body: 'Looking into this now.' })]);
+  });
+
+  it('returns 404 for a missing incident', async () => {
+    const app = buildApp({ findById: vi.fn().mockResolvedValue(null) });
+    const res = await request(app).get(`/incidents/${INC_ID}/comments`);
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('POST /incidents/:id/comments', () => {
+  it('creates a comment and returns 201', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/comments`)
+      .set('X-User-Id', USER_ID)
+      .send({ body: 'Working on it now.' });
+    expect(res.status).toBe(201);
+    expect(res.body.body).toBe('Looking into this now.');
+  });
+
+  it('returns 400 for an empty body', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/comments`)
+      .set('X-User-Id', USER_ID)
+      .send({ body: '' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 403 for a user who is not reporter, assignee, or group member', async () => {
+    const app = buildApp(
+      { findById: vi.fn().mockResolvedValue({ ...seedIncident, reporterId: 'someone-else', assigneeId: 'someone-else' }) },
+      { isMember: vi.fn().mockResolvedValue(false) },
+    );
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/comments`)
+      .set('X-User-Id', USER_ID)
+      .send({ body: 'Sneaky comment' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('returns 404 for a missing incident', async () => {
+    const app = buildApp({ findById: vi.fn().mockResolvedValue(null) });
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/comments`)
+      .set('X-User-Id', USER_ID)
+      .send({ body: 'Working on it now.' });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 401 without an X-User-Id header', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/comments`)
+      .send({ body: 'Working on it now.' });
+    expect(res.status).toBe(401);
   });
 });

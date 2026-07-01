@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { IncidentService } from './incidentService';
-import type { IncidentRepository, GroupRepository, LlmClient } from '../../domain/ports';
-import type { Incident, Group, CurrentUser } from '../../domain/types';
+import type { IncidentRepository, GroupRepository, LlmClient, CommentRepository } from '../../domain/ports';
+import type { Incident, IncidentComment, Group, CurrentUser } from '../../domain/types';
 import { NotFoundError, ForbiddenError, IllegalTransitionError, ValidationError, AiUnavailableError, ParseFailedError } from '../../domain/errors';
 
 const GROUP_ID = '00000000-0000-0000-0000-000000000001';
 const INC_ID = '00000000-0000-0000-0000-000000000010';
 const USER_1 = '00000000-0000-0000-0000-000000000100';
+const COMMENT_ID = '00000000-0000-0000-0000-000000001000';
 
 const currentUser: CurrentUser = { userId: USER_1, name: 'Alice', email: 'alice@example.com' };
 
@@ -15,6 +16,15 @@ const mockGroup = (): Group => ({
   name: 'DBA',
   description: 'Database administrators',
   createdAt: new Date(),
+});
+
+const mockComment = (overrides: Partial<IncidentComment> = {}): IncidentComment => ({
+  commentId: COMMENT_ID,
+  incidentId: INC_ID,
+  authorId: USER_1,
+  body: 'Looking into this now.',
+  createdAt: new Date(),
+  ...overrides,
 });
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -41,7 +51,8 @@ function makeRepos(
   incidentOverrides: Partial<IncidentRepository> = {},
   groupOverrides: Partial<GroupRepository> = {},
   llmOverrides: Partial<LlmClient> = {},
-): { incidentRepo: IncidentRepository; groupRepo: GroupRepository; llmClient: LlmClient } {
+  commentOverrides: Partial<CommentRepository> = {},
+): { incidentRepo: IncidentRepository; groupRepo: GroupRepository; llmClient: LlmClient; commentRepo: CommentRepository } {
   const incidentRepo: IncidentRepository = {
     nextKey: vi.fn().mockResolvedValue('INC-1'),
     create: vi.fn().mockResolvedValue(mockIncident()),
@@ -69,13 +80,18 @@ function makeRepos(
     }),
     ...llmOverrides,
   };
-  return { incidentRepo, groupRepo, llmClient };
+  const commentRepo: CommentRepository = {
+    create: vi.fn().mockResolvedValue(mockComment()),
+    findByIncidentId: vi.fn().mockResolvedValue([mockComment()]),
+    ...commentOverrides,
+  };
+  return { incidentRepo, groupRepo, llmClient, commentRepo };
 }
 
 describe('IncidentService.create', () => {
   it('creates an incident with reporterId from currentUser', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.create(currentUser, {
       title: 'DB refresh failed',
       description: 'Nightly refresh did not complete',
@@ -86,8 +102,8 @@ describe('IncidentService.create', () => {
   });
 
   it('throws ValidationError for a non-existent group', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, { findById: vi.fn().mockResolvedValue(null) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, { findById: vi.fn().mockResolvedValue(null) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(
       svc.create(currentUser, {
         title: 'Test title here',
@@ -101,32 +117,60 @@ describe('IncidentService.create', () => {
 
 describe('IncidentService.findById', () => {
   it('returns the incident', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     const result = await svc.findById(INC_ID);
     expect(result.incidentId).toBe(INC_ID);
   });
 
   it('throws NotFoundError when incident does not exist', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.findById('missing-id')).rejects.toThrow(NotFoundError);
   });
 });
 
 describe('IncidentService.updateStatus', () => {
   it('applies a legal transition', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({
+      findById: vi.fn().mockResolvedValue(mockIncident({ assigneeId: USER_1 })),
+    });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.updateStatus(currentUser, INC_ID, 'InProgress');
     expect(incidentRepo.update).toHaveBeenCalledWith(INC_ID, expect.objectContaining({ status: 'InProgress' }));
   });
 
+  it('throws IllegalTransitionError when moving an unassigned incident to InProgress', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({
+      findById: vi.fn().mockResolvedValue(mockIncident({ status: 'Open', assigneeId: null })),
+    });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await expect(svc.updateStatus(currentUser, INC_ID, 'InProgress')).rejects.toThrow(IllegalTransitionError);
+    expect(incidentRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('allows reopening an assigned Resolved incident back to InProgress', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({
+      findById: vi.fn().mockResolvedValue(mockIncident({ status: 'Resolved', assigneeId: USER_1 })),
+    });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await svc.updateStatus(currentUser, INC_ID, 'InProgress');
+    expect(incidentRepo.update).toHaveBeenCalledWith(INC_ID, expect.objectContaining({ status: 'InProgress' }));
+  });
+
+  it('throws IllegalTransitionError when reopening an unassigned Resolved incident to InProgress', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({
+      findById: vi.fn().mockResolvedValue(mockIncident({ status: 'Resolved', assigneeId: null })),
+    });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await expect(svc.updateStatus(currentUser, INC_ID, 'InProgress')).rejects.toThrow(IllegalTransitionError);
+  });
+
   it('sets resolvedAt on first resolution', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({
       findById: vi.fn().mockResolvedValue(mockIncident({ status: 'InProgress', resolvedAt: null })),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.updateStatus(currentUser, INC_ID, 'Resolved');
     expect(incidentRepo.update).toHaveBeenCalledWith(
       INC_ID,
@@ -136,54 +180,54 @@ describe('IncidentService.updateStatus', () => {
 
   it('does not overwrite existing resolvedAt on reopen → re-resolve', async () => {
     const existing = new Date('2025-01-01');
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({
       findById: vi.fn().mockResolvedValue(mockIncident({ status: 'InProgress', resolvedAt: existing })),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.updateStatus(currentUser, INC_ID, 'Resolved');
     const patch = (incidentRepo.update as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(patch.resolvedAt).toBeUndefined();
   });
 
   it('throws IllegalTransitionError for Open → Closed', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.updateStatus(currentUser, INC_ID, 'Closed')).rejects.toThrow(IllegalTransitionError);
   });
 
   it('throws ForbiddenError when user is neither assignee nor group member', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos(
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos(
       { findById: vi.fn().mockResolvedValue(mockIncident({ assigneeId: 'someone-else' })) },
       { isMember: vi.fn().mockResolvedValue(false) },
     );
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.updateStatus(currentUser, INC_ID, 'InProgress')).rejects.toThrow(ForbiddenError);
   });
 });
 
 describe('IncidentService.updateAssignee', () => {
   it('allows a group member to self-assign', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.updateAssignee(currentUser, INC_ID, USER_1);
     expect(incidentRepo.update).toHaveBeenCalledWith(INC_ID, expect.objectContaining({ assigneeId: USER_1 }));
   });
 
   it('throws ForbiddenError when trying to assign another user', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.updateAssignee(currentUser, INC_ID, 'other-user-id')).rejects.toThrow(ForbiddenError);
   });
 
   it('throws ForbiddenError for non-group-member self-assign', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.updateAssignee(currentUser, INC_ID, USER_1)).rejects.toThrow(ForbiddenError);
   });
 
   it('allows clearing the assignee (null)', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.updateAssignee(currentUser, INC_ID, null);
     expect(incidentRepo.update).toHaveBeenCalledWith(INC_ID, expect.objectContaining({ assigneeId: null }));
   });
@@ -191,34 +235,34 @@ describe('IncidentService.updateAssignee', () => {
 
 describe('IncidentService.updateFields', () => {
   it('allows the reporter to edit fields', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await svc.updateFields(currentUser, INC_ID, { title: 'Updated title here' });
     expect(incidentRepo.update).toHaveBeenCalledWith(INC_ID, expect.objectContaining({ title: 'Updated title here' }));
   });
 
   it('throws ForbiddenError for non-reporter non-member', async () => {
     const stranger: CurrentUser = { userId: 'stranger', name: 'Bob', email: 'bob@example.com' };
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.updateFields(stranger, INC_ID, { title: 'Sneaky edit' })).rejects.toThrow(ForbiddenError);
   });
 });
 
 describe('IncidentService.suggestSeverityAndRouting', () => {
   it('returns the suggestion with the resolved group name', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     const result = await svc.suggestSeverityAndRouting('Nightly DB refresh failed, customers cannot see balances');
     expect(result).toEqual({ severity: 'High', targetGroupId: GROUP_ID, targetGroupName: 'DBA' });
     expect(llmClient.suggestSeverityAndRouting).toHaveBeenCalledWith(expect.any(String), [expect.objectContaining({ groupId: GROUP_ID })]);
   });
 
   it('propagates AiUnavailableError when the LLM call fails', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, {}, {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, {}, {
       suggestSeverityAndRouting: vi.fn().mockRejectedValue(new AiUnavailableError()),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.suggestSeverityAndRouting('Nightly DB refresh failed in production today')).rejects.toThrow(
       AiUnavailableError,
     );
@@ -227,8 +271,8 @@ describe('IncidentService.suggestSeverityAndRouting', () => {
 
 describe('IncidentService.generateSummary', () => {
   it('persists the summary via updateAiCache and returns it', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     const result = await svc.generateSummary(INC_ID);
     expect(result.aiSummary).toBe('A concise incident summary.');
     expect(incidentRepo.updateAiCache).toHaveBeenCalledWith(
@@ -238,16 +282,16 @@ describe('IncidentService.generateSummary', () => {
   });
 
   it('throws NotFoundError for a missing incident', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.generateSummary('missing-id')).rejects.toThrow(NotFoundError);
   });
 
   it('does not touch the cache when the LLM call fails', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, {}, {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, {}, {
       summarize: vi.fn().mockRejectedValue(new AiUnavailableError()),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.generateSummary(INC_ID)).rejects.toThrow(AiUnavailableError);
     expect(incidentRepo.updateAiCache).not.toHaveBeenCalled();
   });
@@ -255,8 +299,8 @@ describe('IncidentService.generateSummary', () => {
 
 describe('IncidentService.generateRootCause', () => {
   it('persists root-cause hypotheses via updateAiCache and returns them', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     const result = await svc.generateRootCause(INC_ID);
     expect(result.aiRootCause).toEqual(['Cause A', 'Cause B']);
     expect(incidentRepo.updateAiCache).toHaveBeenCalledWith(
@@ -266,16 +310,16 @@ describe('IncidentService.generateRootCause', () => {
   });
 
   it('throws NotFoundError for a missing incident', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.generateRootCause('missing-id')).rejects.toThrow(NotFoundError);
   });
 
   it('does not touch the cache when the LLM call fails', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, {}, {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, {}, {
       suggestRootCause: vi.fn().mockRejectedValue(new AiUnavailableError()),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.generateRootCause(INC_ID)).rejects.toThrow(AiUnavailableError);
     expect(incidentRepo.updateAiCache).not.toHaveBeenCalled();
   });
@@ -283,8 +327,8 @@ describe('IncidentService.generateRootCause', () => {
 
 describe('IncidentService.parseIntake', () => {
   it('returns the parsed draft with the resolved group name', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos();
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos();
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     const result = await svc.parseIntake('The nightly DB refresh job failed, customers cannot see balances');
     expect(result).toEqual({
       title: 'DB refresh failed overnight',
@@ -296,22 +340,84 @@ describe('IncidentService.parseIntake', () => {
   });
 
   it('propagates ParseFailedError when the LLM output fails validation', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, {}, {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, {}, {
       parseIntake: vi.fn().mockRejectedValue(new ParseFailedError()),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.parseIntake('Some free text about an incident that happened overnight')).rejects.toThrow(
       ParseFailedError,
     );
   });
 
   it('propagates AiUnavailableError when the LLM call fails', async () => {
-    const { incidentRepo, groupRepo, llmClient } = makeRepos({}, {}, {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, {}, {
       parseIntake: vi.fn().mockRejectedValue(new AiUnavailableError()),
     });
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
     await expect(svc.parseIntake('Some free text about an incident that happened overnight')).rejects.toThrow(
       AiUnavailableError,
     );
+  });
+});
+
+describe('IncidentService.addComment', () => {
+  it('allows the reporter to comment', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, { isMember: vi.fn().mockResolvedValue(false) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await svc.addComment(currentUser, INC_ID, 'Working on it.');
+    expect(commentRepo.create).toHaveBeenCalledWith({ incidentId: INC_ID, authorId: USER_1, body: 'Working on it.' });
+  });
+
+  it('allows the assignee to comment', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos(
+      { findById: vi.fn().mockResolvedValue(mockIncident({ reporterId: 'someone-else', assigneeId: USER_1 })) },
+      { isMember: vi.fn().mockResolvedValue(false) },
+    );
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await svc.addComment(currentUser, INC_ID, 'Working on it.');
+    expect(commentRepo.create).toHaveBeenCalled();
+  });
+
+  it('allows a target-group member to comment', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos(
+      { findById: vi.fn().mockResolvedValue(mockIncident({ reporterId: 'someone-else', assigneeId: 'someone-else' })) },
+      { isMember: vi.fn().mockResolvedValue(true) },
+    );
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await svc.addComment(currentUser, INC_ID, 'Working on it.');
+    expect(commentRepo.create).toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenError for a stranger', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos(
+      { findById: vi.fn().mockResolvedValue(mockIncident({ reporterId: 'someone-else', assigneeId: 'someone-else' })) },
+      { isMember: vi.fn().mockResolvedValue(false) },
+    );
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await expect(svc.addComment(currentUser, INC_ID, 'Sneaky comment')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('throws NotFoundError for a missing incident', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await expect(svc.addComment(currentUser, 'missing-id', 'Hello')).rejects.toThrow(NotFoundError);
+  });
+});
+
+describe('IncidentService.listComments', () => {
+  it('returns comments for the incident', async () => {
+    const comment = mockComment();
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({}, {}, {}, {
+      findByIncidentId: vi.fn().mockResolvedValue([comment]),
+    });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    const result = await svc.listComments(INC_ID);
+    expect(result).toEqual([comment]);
+  });
+
+  it('throws NotFoundError for a missing incident', async () => {
+    const { incidentRepo, groupRepo, llmClient, commentRepo } = makeRepos({ findById: vi.fn().mockResolvedValue(null) });
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
+    await expect(svc.listComments('missing-id')).rejects.toThrow(NotFoundError);
   });
 });

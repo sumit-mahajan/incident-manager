@@ -4,6 +4,7 @@ import { createDbClient } from './db/client';
 import { DrizzleUserRepository } from './infrastructure/DrizzleUserRepository';
 import { DrizzleGroupRepository } from './infrastructure/DrizzleGroupRepository';
 import { DrizzleIncidentRepository } from './infrastructure/DrizzleIncidentRepository';
+import { DrizzleCommentRepository } from './infrastructure/DrizzleCommentRepository';
 import { GeminiLlmClient } from './infrastructure/GeminiLlmClient';
 import { IncidentService } from './features/incidents/incidentService';
 import { incidentRoutes } from './features/incidents/incidentRoutes';
@@ -27,9 +28,10 @@ export function buildContainer(): Container {
   const userRepo = new DrizzleUserRepository(db);
   const groupRepo = new DrizzleGroupRepository(db);
   const incidentRepo = new DrizzleIncidentRepository(db);
+  const commentRepo = new DrizzleCommentRepository(db);
   const llmClient = new GeminiLlmClient(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL);
 
-  const incidentService = new IncidentService(incidentRepo, groupRepo, llmClient);
+  const incidentService = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
   const auth = resolveCurrentUser(userRepo);
 
   return {

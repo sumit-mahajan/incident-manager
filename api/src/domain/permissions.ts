@@ -11,3 +11,11 @@ export function canUpdateStatus(currentUser: CurrentUser, incident: Incident, is
 export function canEditFields(currentUser: CurrentUser, incident: Incident, isTargetGroupMember: boolean): boolean {
   return incident.reporterId === currentUser.userId || isTargetGroupMember;
 }
+
+export function canComment(currentUser: CurrentUser, incident: Incident, isTargetGroupMember: boolean): boolean {
+  return (
+    incident.reporterId === currentUser.userId ||
+    incident.assigneeId === currentUser.userId ||
+    isTargetGroupMember
+  );
+}

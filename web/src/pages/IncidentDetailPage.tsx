@@ -1,7 +1,9 @@
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, User, Calendar, Tag, Sparkles, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, User, Calendar, Tag, Sparkles, RefreshCw, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { SeverityBadge, StatusBadge } from '../components/Badge';
+import { StatusTracker } from '../components/StatusTracker';
 import {
   useIncident,
   useUpdateStatus,
@@ -11,6 +13,8 @@ import {
   useGroups,
   useGenerateSummary,
   useGenerateRootCause,
+  useComments,
+  useAddComment,
   errorMessage,
 } from '../features/incidents/hooks';
 import { useUserStore } from '../features/auth/UserStoreProvider';
@@ -52,6 +56,9 @@ export function IncidentDetailPage() {
   const updateAssignee = useUpdateAssignee(id!);
   const generateSummary = useGenerateSummary(id!);
   const generateRootCause = useGenerateRootCause(id!);
+  const { data: comments = [] } = useComments(id!);
+  const addComment = useAddComment(id!);
+  const [commentBody, setCommentBody] = useState('');
 
   if (isLoading) {
     return (
@@ -78,11 +85,12 @@ export function IncidentDetailPage() {
   }
 
   const isTargetGroupMember = activeUserGroups.some((g) => g.groupId === incident.targetGroupId);
-  const isAssignee = activeUserId === incident.assigneeId;
+  const isAssignee = !!activeUserId && activeUserId === incident.assigneeId;
   const isReporter = activeUserId === incident.reporterId;
 
   const canUpdateStatus = isAssignee || isTargetGroupMember;
-  const isAlreadyAssignedToMe = activeUserId === incident.assigneeId;
+  const canComment = isReporter || isAssignee || isTargetGroupMember;
+  const isAlreadyAssignedToMe = isAssignee;
 
   const transitions = ALLOWED_TRANSITIONS[incident.status];
 
@@ -120,6 +128,17 @@ export function IncidentDetailPage() {
       return;
     }
     generateRootCause.mutate();
+  }
+
+  function handleAddComment() {
+    if (!activeUserId) {
+      toast.error('Select a user first');
+      return;
+    }
+    if (!commentBody.trim()) return;
+    addComment.mutate(commentBody.trim(), {
+      onSuccess: () => setCommentBody(''),
+    });
   }
 
   return (
@@ -232,6 +251,59 @@ export function IncidentDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Comments */}
+          <div className="bg-surface border border-surface-border rounded-lg p-4">
+            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Comments</p>
+
+            {comments.length > 0 ? (
+              <ul className="space-y-3 mb-4">
+                {comments.map((comment) => {
+                  const author = users.find((u) => u.userId === comment.authorId);
+                  return (
+                    <li key={comment.commentId} className="border-b border-surface-border last:border-0 pb-3 last:pb-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium text-foreground">{author ? author.name : 'Unknown user'}</span>
+                        <span className="text-xs text-muted">{formatDate(comment.createdAt)}</span>
+                      </div>
+                      <p className="text-sm text-muted whitespace-pre-wrap break-words">{comment.body}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted italic mb-4">No comments yet.</p>
+            )}
+
+            {canComment ? (
+              <div className="space-y-2">
+                <textarea
+                  value={commentBody}
+                  onChange={(e) => setCommentBody(e.target.value)}
+                  placeholder="Add a comment…"
+                  rows={3}
+                  className="w-full px-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+                {addComment.isError && (
+                  <p className="text-xs text-destructive">
+                    {errorMessage(addComment.error, 'Failed to post comment. Please try again.')}
+                  </p>
+                )}
+                <button
+                  onClick={handleAddComment}
+                  disabled={addComment.isPending || !commentBody.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50"
+                >
+                  <MessageSquare size={12} />
+                  {addComment.isPending ? 'Posting…' : 'Submit'}
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted italic">
+                Only the reporter, assignee, or target group members can comment.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Sidebar */}
@@ -239,29 +311,38 @@ export function IncidentDetailPage() {
           {/* Status machine */}
           <div className="bg-surface border border-surface-border rounded-lg p-4">
             <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Status</p>
-            <StatusBadge status={incident.status} className="mb-3" />
+            <StatusTracker current={incident.status} className="mb-3" />
 
             {transitions.length > 0 && (
               <div className="space-y-2">
                 {canUpdateStatus ? (
-                  transitions.map((next) => (
-                    <button
-                      key={next}
-                      onClick={() => handleStatusUpdate(next)}
-                      disabled={updateStatus.isPending}
-                      className="w-full px-3 py-2 text-sm bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-60"
-                    >
-                      {next === 'Resolved'
-                        ? 'Resolve'
-                        : next === 'Closed'
-                        ? 'Close'
-                        : next === 'InProgress'
-                        ? incident.status === 'Open'
-                          ? 'Start Work'
-                          : 'Reopen'
-                        : STATUS_LABELS[next]}
-                    </button>
-                  ))
+                  transitions.map((next) => {
+                    const blockedByAssignment = next === 'InProgress' && !incident.assigneeId;
+                    return (
+                      <div key={next}>
+                        <button
+                          onClick={() => handleStatusUpdate(next)}
+                          disabled={updateStatus.isPending || blockedByAssignment}
+                          className="w-full px-3 py-2 text-sm bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {next === 'Resolved'
+                            ? 'Resolve'
+                            : next === 'Closed'
+                            ? 'Close'
+                            : next === 'InProgress'
+                            ? incident.status === 'Open'
+                              ? 'Start Work'
+                              : 'Reopen'
+                            : STATUS_LABELS[next]}
+                        </button>
+                        {blockedByAssignment && (
+                          <p className="mt-1 text-xs text-muted italic">
+                            Self-assign before moving to In Progress.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
                 ) : (
                   <p className="text-xs text-muted italic">
                     Only the assignee or group members can update status.

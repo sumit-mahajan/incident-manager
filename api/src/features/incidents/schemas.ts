@@ -33,6 +33,10 @@ export const IntakeSchema = z.object({
   text: z.string().min(20, 'Text must be at least 20 characters'),
 });
 
+export const CreateCommentSchema = z.object({
+  body: z.string().min(1, 'Comment cannot be empty').max(2000, 'Comment must be at most 2000 characters'),
+});
+
 export const ListIncidentsQuerySchema = z.object({
   severity: z.enum(['Critical', 'High', 'Medium', 'Low']).optional(),
   status: z.enum(['Open', 'InProgress', 'Resolved', 'Closed']).optional(),
@@ -48,4 +52,5 @@ export type UpdateStatusInput = z.infer<typeof UpdateStatusSchema>;
 export type UpdateAssigneeInput = z.infer<typeof UpdateAssigneeSchema>;
 export type SuggestInput = z.infer<typeof SuggestSchema>;
 export type IntakeInput = z.infer<typeof IntakeSchema>;
+export type CreateCommentInput = z.infer<typeof CreateCommentSchema>;
 export type ListIncidentsQuery = z.infer<typeof ListIncidentsQuerySchema>;

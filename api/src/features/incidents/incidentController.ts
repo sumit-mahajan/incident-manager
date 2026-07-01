@@ -8,6 +8,7 @@ import {
   UpdateAssigneeSchema,
   SuggestSchema,
   IntakeSchema,
+  CreateCommentSchema,
   ListIncidentsQuerySchema,
 } from './schemas';
 import { ValidationError } from '../../domain/errors';
@@ -122,6 +123,25 @@ export class IncidentController {
       res.json({ parsed });
     } catch (err) {
       next(err instanceof ZodError ? zodToValidation(err) : err);
+    }
+  };
+
+  createComment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { body } = CreateCommentSchema.parse(req.body);
+      const comment = await this.service.addComment(req.currentUser, req.params.id, body);
+      res.status(201).json(comment);
+    } catch (err) {
+      next(err instanceof ZodError ? zodToValidation(err) : err);
+    }
+  };
+
+  listComments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const comments = await this.service.listComments(req.params.id);
+      res.json(comments);
+    } catch (err) {
+      next(err);
     }
   };
 }

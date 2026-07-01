@@ -54,3 +54,11 @@ export interface IncidentDraft {
   targetGroupId: string;
   targetGroupName: string;
 }
+
+export interface IncidentComment {
+  commentId: string;
+  incidentId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+}

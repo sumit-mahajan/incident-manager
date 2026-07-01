@@ -14,7 +14,6 @@ export default function App() {
           <Route path="/incidents" element={<IncidentListPage />} />
           <Route path="/incidents/new" element={<CreateIncidentPage />} />
           <Route path="/incidents/:id" element={<IncidentDetailPage />} />
-          {/* M3: /incidents/intake */}
         </Routes>
       </main>
     </div>

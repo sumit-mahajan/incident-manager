@@ -1,15 +1,25 @@
-import type { CurrentUser, Incident, IncidentFilter, Pagination, Paginated, Severity, Status } from '../../domain/types';
-import type { IncidentRepository, GroupRepository, LlmClient } from '../../domain/ports';
-import { NotFoundError, ForbiddenError, ValidationError } from '../../domain/errors';
+import type {
+  CurrentUser,
+  Incident,
+  IncidentComment,
+  IncidentFilter,
+  Pagination,
+  Paginated,
+  Severity,
+  Status,
+} from '../../domain/types';
+import type { IncidentRepository, GroupRepository, LlmClient, CommentRepository } from '../../domain/ports';
+import { NotFoundError, ForbiddenError, ValidationError, IllegalTransitionError } from '../../domain/errors';
 import { validateTransition } from '../../domain/statemachine';
-import { canSelfAssign, canUpdateStatus, canEditFields } from '../../domain/permissions';
+import { canSelfAssign, canUpdateStatus, canEditFields, canComment } from '../../domain/permissions';
 import type { CreateIncidentInput, UpdateIncidentFieldsInput } from './schemas';
 
 export class IncidentService {
   constructor(
     private incidentRepo: IncidentRepository,
     private groupRepo: GroupRepository,
-    private llmClient: LlmClient
+    private llmClient: LlmClient,
+    private commentRepo: CommentRepository
   ) {}
 
   async create(currentUser: CurrentUser, input: CreateIncidentInput): Promise<Incident> {
@@ -60,6 +70,14 @@ export class IncidentService {
     if (!canUpdateStatus(currentUser, incident, isMember)) throw new ForbiddenError();
 
     validateTransition(incident.status, newStatus);
+
+    if (newStatus === 'InProgress' && !incident.assigneeId) {
+      throw new IllegalTransitionError(
+        incident.status,
+        newStatus,
+        'Incident must be assigned before it can move to InProgress'
+      );
+    }
 
     return this.incidentRepo.update(id, {
       status: newStatus,
@@ -116,6 +134,23 @@ export class IncidentService {
 
     await this.incidentRepo.updateAiCache(id, { aiRootCause, aiRootCauseGeneratedAt, updatedAt: new Date() });
     return { aiRootCause, aiRootCauseGeneratedAt };
+  }
+
+  async addComment(currentUser: CurrentUser, incidentId: string, body: string): Promise<IncidentComment> {
+    const incident = await this.incidentRepo.findById(incidentId);
+    if (!incident) throw new NotFoundError('Incident');
+
+    const isMember = await this.groupRepo.isMember(currentUser.userId, incident.targetGroupId);
+    if (!canComment(currentUser, incident, isMember)) throw new ForbiddenError();
+
+    return this.commentRepo.create({ incidentId, authorId: currentUser.userId, body });
+  }
+
+  async listComments(incidentId: string): Promise<IncidentComment[]> {
+    const incident = await this.incidentRepo.findById(incidentId);
+    if (!incident) throw new NotFoundError('Incident');
+
+    return this.commentRepo.findByIncidentId(incidentId);
   }
 
   async parseIntake(

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canSelfAssign, canUpdateStatus, canEditFields } from './permissions';
+import { canSelfAssign, canUpdateStatus, canEditFields, canComment } from './permissions';
 import type { CurrentUser, Incident } from './types';
 
 const makeUser = (id: string): CurrentUser => ({ userId: id, name: 'Test User', email: 'test@example.com' });
@@ -68,5 +68,30 @@ describe('canEditFields', () => {
   it('returns false for non-reporter non-member', () => {
     const user = makeUser('stranger');
     expect(canEditFields(user, makeIncident(), false)).toBe(false);
+  });
+});
+
+describe('canComment', () => {
+  it('returns true for the reporter', () => {
+    const user = makeUser('reporter-id');
+    expect(canComment(user, makeIncident(), false)).toBe(true);
+  });
+
+  it('returns true for the assignee', () => {
+    const user = makeUser('assignee-id');
+    const incident = makeIncident({ reporterId: 'someone-else', assigneeId: 'assignee-id' });
+    expect(canComment(user, incident, false)).toBe(true);
+  });
+
+  it('returns true for a target-group member', () => {
+    const user = makeUser('member-id');
+    const incident = makeIncident({ reporterId: 'someone-else', assigneeId: 'someone-else' });
+    expect(canComment(user, incident, true)).toBe(true);
+  });
+
+  it('returns false for a stranger', () => {
+    const user = makeUser('stranger');
+    const incident = makeIncident({ reporterId: 'someone-else', assigneeId: 'someone-else' });
+    expect(canComment(user, incident, false)).toBe(false);
   });
 });
