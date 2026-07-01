@@ -3,6 +3,13 @@ import { toast } from 'sonner';
 import { incidentService, userService, groupService, type IncidentFilters } from './services';
 import { ApiError } from '../../lib/apiClient';
 
+export function errorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiError)) return fallback;
+  if (err.code === 'AI_UNAVAILABLE') return 'AI service is temporarily unavailable. Please try again shortly.';
+  if (err.code === 'PARSE_FAILED') return 'AI returned an unexpected response. Please try again.';
+  return err.message;
+}
+
 export function useIncidents(filters: IncidentFilters) {
   return useQuery({
     queryKey: ['incidents', filters],
@@ -26,8 +33,7 @@ export function useCreateIncident() {
       qc.invalidateQueries({ queryKey: ['incidents'] });
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to create incident';
-      toast.error(msg);
+      toast.error(errorMessage(err, 'Failed to create incident'));
     },
   });
 }
@@ -41,8 +47,7 @@ export function useUpdateStatus(id: string) {
       qc.invalidateQueries({ queryKey: ['incidents'] });
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to update status';
-      toast.error(msg);
+      toast.error(errorMessage(err, 'Failed to update status'));
     },
   });
 }
@@ -56,8 +61,39 @@ export function useUpdateAssignee(id: string) {
       qc.invalidateQueries({ queryKey: ['incidents'] });
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to update assignee';
-      toast.error(msg);
+      toast.error(errorMessage(err, 'Failed to update assignee'));
+    },
+  });
+}
+
+export function useSuggestIncident() {
+  return useMutation({
+    mutationFn: incidentService.suggest,
+  });
+}
+
+export function useIntakeIncident() {
+  return useMutation({
+    mutationFn: incidentService.intake,
+  });
+}
+
+export function useGenerateSummary(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => incidentService.generateSummary(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['incident', id] });
+    },
+  });
+}
+
+export function useGenerateRootCause(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => incidentService.generateRootCause(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['incident', id] });
     },
   });
 }

@@ -25,6 +25,14 @@ export const UpdateAssigneeSchema = z.object({
   assigneeId: z.string().uuid().nullable(),
 });
 
+export const SuggestSchema = z.object({
+  description: z.string().min(20, 'Description must be at least 20 characters'),
+});
+
+export const IntakeSchema = z.object({
+  text: z.string().min(20, 'Text must be at least 20 characters'),
+});
+
 export const ListIncidentsQuerySchema = z.object({
   severity: z.enum(['Critical', 'High', 'Medium', 'Low']).optional(),
   status: z.enum(['Open', 'InProgress', 'Resolved', 'Closed']).optional(),
@@ -38,4 +46,6 @@ export type CreateIncidentInput = z.infer<typeof CreateIncidentSchema>;
 export type UpdateIncidentFieldsInput = z.infer<typeof UpdateIncidentFieldsSchema>;
 export type UpdateStatusInput = z.infer<typeof UpdateStatusSchema>;
 export type UpdateAssigneeInput = z.infer<typeof UpdateAssigneeSchema>;
+export type SuggestInput = z.infer<typeof SuggestSchema>;
+export type IntakeInput = z.infer<typeof IntakeSchema>;
 export type ListIncidentsQuery = z.infer<typeof ListIncidentsQuerySchema>;

@@ -1,5 +1,5 @@
 import type { CurrentUser, Incident, IncidentFilter, Pagination, Paginated, Severity, Status } from '../../domain/types';
-import type { IncidentRepository, GroupRepository } from '../../domain/ports';
+import type { IncidentRepository, GroupRepository, LlmClient } from '../../domain/ports';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../domain/errors';
 import { validateTransition } from '../../domain/statemachine';
 import { canSelfAssign, canUpdateStatus, canEditFields } from '../../domain/permissions';
@@ -8,7 +8,8 @@ import type { CreateIncidentInput, UpdateIncidentFieldsInput } from './schemas';
 export class IncidentService {
   constructor(
     private incidentRepo: IncidentRepository,
-    private groupRepo: GroupRepository
+    private groupRepo: GroupRepository,
+    private llmClient: LlmClient
   ) {}
 
   async create(currentUser: CurrentUser, input: CreateIncidentInput): Promise<Incident> {
@@ -82,5 +83,47 @@ export class IncidentService {
       assigneeId,
       updatedAt: new Date(),
     });
+  }
+
+  async suggestSeverityAndRouting(
+    description: string
+  ): Promise<{ severity: Severity; targetGroupId: string; targetGroupName: string }> {
+    const groups = await this.groupRepo.findAll();
+    const suggestion = await this.llmClient.suggestSeverityAndRouting(description, groups);
+    const group = groups.find((g) => g.groupId === suggestion.targetGroupId)!;
+    return { ...suggestion, targetGroupName: group.name };
+  }
+
+  async generateSummary(id: string): Promise<{ aiSummary: string; aiSummaryGeneratedAt: Date }> {
+    const incident = await this.incidentRepo.findById(id);
+    if (!incident) throw new NotFoundError('Incident');
+
+    const group = await this.groupRepo.findById(incident.targetGroupId);
+    const aiSummary = await this.llmClient.summarize(incident, group?.name ?? 'Unknown group');
+    const aiSummaryGeneratedAt = new Date();
+
+    await this.incidentRepo.updateAiCache(id, { aiSummary, aiSummaryGeneratedAt, updatedAt: new Date() });
+    return { aiSummary, aiSummaryGeneratedAt };
+  }
+
+  async generateRootCause(id: string): Promise<{ aiRootCause: string[]; aiRootCauseGeneratedAt: Date }> {
+    const incident = await this.incidentRepo.findById(id);
+    if (!incident) throw new NotFoundError('Incident');
+
+    const group = await this.groupRepo.findById(incident.targetGroupId);
+    const aiRootCause = await this.llmClient.suggestRootCause(incident, group?.name ?? 'Unknown group');
+    const aiRootCauseGeneratedAt = new Date();
+
+    await this.incidentRepo.updateAiCache(id, { aiRootCause, aiRootCauseGeneratedAt, updatedAt: new Date() });
+    return { aiRootCause, aiRootCauseGeneratedAt };
+  }
+
+  async parseIntake(
+    text: string
+  ): Promise<{ title: string; description: string; severity: Severity; targetGroupId: string; targetGroupName: string }> {
+    const groups = await this.groupRepo.findAll();
+    const parsed = await this.llmClient.parseIntake(text, groups);
+    const group = groups.find((g) => g.groupId === parsed.targetGroupId)!;
+    return { ...parsed, targetGroupName: group.name };
   }
 }

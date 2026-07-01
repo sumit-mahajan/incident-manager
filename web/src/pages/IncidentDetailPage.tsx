@@ -1,8 +1,18 @@
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, User, Calendar, Tag } from 'lucide-react';
+import { ArrowLeft, User, Calendar, Tag, Sparkles, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { SeverityBadge, StatusBadge } from '../components/Badge';
-import { useIncident, useUpdateStatus, useUpdateAssignee, useUsers, useUserGroups, useGroups } from '../features/incidents/hooks';
+import {
+  useIncident,
+  useUpdateStatus,
+  useUpdateAssignee,
+  useUsers,
+  useUserGroups,
+  useGroups,
+  useGenerateSummary,
+  useGenerateRootCause,
+  errorMessage,
+} from '../features/incidents/hooks';
 import { useUserStore } from '../features/auth/UserStoreProvider';
 import type { Status } from '../types';
 
@@ -40,6 +50,8 @@ export function IncidentDetailPage() {
   const { data: activeUserGroups = [] } = useUserGroups(activeUserId);
   const updateStatus = useUpdateStatus(id!);
   const updateAssignee = useUpdateAssignee(id!);
+  const generateSummary = useGenerateSummary(id!);
+  const generateRootCause = useGenerateRootCause(id!);
 
   if (isLoading) {
     return (
@@ -94,6 +106,22 @@ export function IncidentDetailPage() {
     updateAssignee.mutate(activeUserId);
   }
 
+  function handleGenerateSummary() {
+    if (!activeUserId) {
+      toast.error('Select a user first');
+      return;
+    }
+    generateSummary.mutate();
+  }
+
+  function handleGenerateRootCause() {
+    if (!activeUserId) {
+      toast.error('Select a user first');
+      return;
+    }
+    generateRootCause.mutate();
+  }
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 animate-fade-in">
       {/* Back */}
@@ -116,6 +144,75 @@ export function IncidentDetailPage() {
             </div>
             <h1 className="text-xl font-semibold text-foreground mb-3">{incident.title}</h1>
             <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{incident.description}</p>
+          </div>
+
+          {/* AI Summary */}
+          <div className="bg-surface border border-surface-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-medium text-muted uppercase tracking-wide">AI Summary</p>
+              <button
+                onClick={handleGenerateSummary}
+                disabled={generateSummary.isPending}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-surface border border-surface-border rounded-md text-foreground hover:border-accent transition-colors disabled:opacity-50"
+              >
+                {incident.aiSummary ? <RefreshCw size={12} /> : <Sparkles size={12} />}
+                {generateSummary.isPending ? 'Generating…' : incident.aiSummary ? 'Regenerate' : 'Generate Summary'}
+              </button>
+            </div>
+            {generateSummary.isError && (
+              <p className="text-xs text-destructive mb-2">
+                {errorMessage(generateSummary.error, 'Failed to generate summary. Please try again.')}
+              </p>
+            )}
+            {incident.aiSummary ? (
+              <>
+                <p className="text-sm text-foreground leading-relaxed">{incident.aiSummary}</p>
+                {incident.aiSummaryGeneratedAt && (
+                  <p className="text-xs text-muted mt-2">Generated {formatDate(incident.aiSummaryGeneratedAt)}</p>
+                )}
+              </>
+            ) : (
+              !generateSummary.isPending && <p className="text-xs text-muted italic">No summary generated yet.</p>
+            )}
+          </div>
+
+          {/* AI Root Cause */}
+          <div className="bg-surface border border-surface-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-medium text-muted uppercase tracking-wide">AI Root-Cause Hypotheses</p>
+              <button
+                onClick={handleGenerateRootCause}
+                disabled={generateRootCause.isPending}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-surface border border-surface-border rounded-md text-foreground hover:border-accent transition-colors disabled:opacity-50"
+              >
+                {incident.aiRootCause ? <RefreshCw size={12} /> : <Sparkles size={12} />}
+                {generateRootCause.isPending
+                  ? 'Generating…'
+                  : incident.aiRootCause
+                  ? 'Regenerate'
+                  : 'Suggest Root Causes'}
+              </button>
+            </div>
+            {generateRootCause.isError && (
+              <p className="text-xs text-destructive mb-2">
+                {errorMessage(generateRootCause.error, 'Failed to generate root-cause hypotheses. Please try again.')}
+              </p>
+            )}
+            {incident.aiRootCause && incident.aiRootCause.length > 0 ? (
+              <>
+                <p className="text-xs text-muted italic mb-2">Advisory hypotheses, not definitive findings.</p>
+                <ul className="list-disc list-inside space-y-1 text-sm text-foreground">
+                  {incident.aiRootCause.map((cause, i) => (
+                    <li key={i}>{cause}</li>
+                  ))}
+                </ul>
+                {incident.aiRootCauseGeneratedAt && (
+                  <p className="text-xs text-muted mt-2">Generated {formatDate(incident.aiRootCauseGeneratedAt)}</p>
+                )}
+              </>
+            ) : (
+              !generateRootCause.isPending && <p className="text-xs text-muted italic">No root-cause hypotheses generated yet.</p>
+            )}
           </div>
 
           {/* Timestamps */}

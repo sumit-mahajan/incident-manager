@@ -6,6 +6,8 @@ import {
   UpdateIncidentFieldsSchema,
   UpdateStatusSchema,
   UpdateAssigneeSchema,
+  SuggestSchema,
+  IntakeSchema,
   ListIncidentsQuerySchema,
 } from './schemas';
 import { ValidationError } from '../../domain/errors';
@@ -80,6 +82,44 @@ export class IncidentController {
       const { assigneeId } = UpdateAssigneeSchema.parse(req.body);
       const incident = await this.service.updateAssignee(req.currentUser, req.params.id, assigneeId);
       res.json(incident);
+    } catch (err) {
+      next(err instanceof ZodError ? zodToValidation(err) : err);
+    }
+  };
+
+  suggest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { description } = SuggestSchema.parse(req.body);
+      const suggestion = await this.service.suggestSeverityAndRouting(description);
+      res.json(suggestion);
+    } catch (err) {
+      next(err instanceof ZodError ? zodToValidation(err) : err);
+    }
+  };
+
+  generateSummary = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const result = await this.service.generateSummary(req.params.id);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  generateRootCause = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const result = await this.service.generateRootCause(req.params.id);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  intake = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { text } = IntakeSchema.parse(req.body);
+      const parsed = await this.service.parseIntake(text);
+      res.json({ parsed });
     } catch (err) {
       next(err instanceof ZodError ? zodToValidation(err) : err);
     }

@@ -1,5 +1,5 @@
 import { api } from '../../lib/apiClient';
-import type { Incident, Paginated, Group, User } from '../../types';
+import type { Incident, Paginated, Group, User, IncidentSuggestion, IncidentDraft } from '../../types';
 
 export interface IncidentFilters {
   severity?: string;
@@ -36,6 +36,18 @@ export const incidentService = {
 
   updateAssignee: (id: string, assigneeId: string | null) =>
     api.patch<Incident>(`/incidents/${id}/assignee`, { assigneeId }),
+
+  suggest: (description: string) =>
+    api.post<IncidentSuggestion>('/incidents/suggest', { description }),
+
+  generateSummary: (id: string) =>
+    api.post<{ aiSummary: string; aiSummaryGeneratedAt: string }>(`/incidents/${id}/summary`, {}),
+
+  generateRootCause: (id: string) =>
+    api.post<{ aiRootCause: string[]; aiRootCauseGeneratedAt: string }>(`/incidents/${id}/root-cause`, {}),
+
+  intake: (text: string) =>
+    api.post<{ parsed: IncidentDraft }>('/incidents/intake', { text }),
 };
 
 export const userService = {

@@ -6,8 +6,9 @@ import { userRoutes } from '../users/userRoutes';
 import { groupRoutes } from '../groups/groupRoutes';
 import { resolveCurrentUser } from '../../middleware/auth';
 import { IncidentService } from './incidentService';
-import type { UserRepository, GroupRepository, IncidentRepository } from '../../domain/ports';
+import type { UserRepository, GroupRepository, IncidentRepository, LlmClient } from '../../domain/ports';
 import type { Incident, User, Group } from '../../domain/types';
+import { AiUnavailableError, ParseFailedError } from '../../domain/errors';
 
 const GROUP_ID = '00000000-0000-0000-0000-000000000001';
 const INC_ID = '00000000-0000-0000-0000-000000000010';
@@ -46,7 +47,11 @@ const seedIncident: Incident = {
   updatedAt: new Date(),
 };
 
-function buildApp(incidentOverrides: Partial<IncidentRepository> = {}, groupOverrides: Partial<GroupRepository> = {}) {
+function buildApp(
+  incidentOverrides: Partial<IncidentRepository> = {},
+  groupOverrides: Partial<GroupRepository> = {},
+  llmOverrides: Partial<LlmClient> = {},
+) {
   const userRepo: UserRepository = {
     findById: vi.fn().mockResolvedValue(seedUser),
     findAll: vi.fn().mockResolvedValue([seedUser]),
@@ -70,8 +75,21 @@ function buildApp(incidentOverrides: Partial<IncidentRepository> = {}, groupOver
     ...incidentOverrides,
   };
 
+  const llmClient: LlmClient = {
+    suggestSeverityAndRouting: vi.fn().mockResolvedValue({ severity: 'High', targetGroupId: GROUP_ID }),
+    summarize: vi.fn().mockResolvedValue('A concise incident summary.'),
+    suggestRootCause: vi.fn().mockResolvedValue(['Cause A', 'Cause B']),
+    parseIntake: vi.fn().mockResolvedValue({
+      title: 'DB refresh failed overnight',
+      description: 'The nightly refresh job failed, balances are stale',
+      severity: 'High',
+      targetGroupId: GROUP_ID,
+    }),
+    ...llmOverrides,
+  };
+
   const auth = resolveCurrentUser(userRepo);
-  const svc = new IncidentService(incidentRepo, groupRepo);
+  const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
 
   return createApp({
     incidents: incidentRoutes(svc, auth),
@@ -116,8 +134,14 @@ describe('Auth middleware', () => {
       update: vi.fn(),
       updateAiCache: vi.fn(),
     };
+    const llmClient: LlmClient = {
+      suggestSeverityAndRouting: vi.fn(),
+      summarize: vi.fn(),
+      suggestRootCause: vi.fn(),
+      parseIntake: vi.fn(),
+    };
     const auth = resolveCurrentUser(userRepo);
-    const svc = new IncidentService(incidentRepo, groupRepo);
+    const svc = new IncidentService(incidentRepo, groupRepo, llmClient);
     const app = createApp({
       incidents: incidentRoutes(svc, auth),
       users: userRoutes(userRepo),
@@ -227,6 +251,174 @@ describe('PATCH /incidents/:id/status', () => {
       .send({ status: 'InProgress' });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+});
+
+describe('POST /incidents/suggest', () => {
+  it('returns severity and routing suggestion', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/incidents/suggest')
+      .set('X-User-Id', USER_ID)
+      .send({ description: 'Nightly DB refresh failed, customers cannot see balances' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ severity: 'High', targetGroupId: GROUP_ID, targetGroupName: 'DBA' });
+  });
+
+  it('returns 400 when description is too short', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/incidents/suggest')
+      .set('X-User-Id', USER_ID)
+      .send({ description: 'too short' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 503 when the LLM call fails', async () => {
+    const app = buildApp({}, {}, {
+      suggestSeverityAndRouting: vi.fn().mockRejectedValue(new AiUnavailableError()),
+    });
+    const res = await request(app)
+      .post('/incidents/suggest')
+      .set('X-User-Id', USER_ID)
+      .send({ description: 'Nightly DB refresh failed, customers cannot see balances' });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('AI_UNAVAILABLE');
+  });
+
+  it('returns 401 without an X-User-Id header', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/incidents/suggest')
+      .send({ description: 'Nightly DB refresh failed, customers cannot see balances' });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /incidents/:id/summary', () => {
+  it('generates and returns an AI summary', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/summary`)
+      .set('X-User-Id', USER_ID);
+    expect(res.status).toBe(200);
+    expect(res.body.aiSummary).toBe('A concise incident summary.');
+    expect(res.body.aiSummaryGeneratedAt).toBeDefined();
+  });
+
+  it('returns 404 for a missing incident', async () => {
+    const app = buildApp({ findById: vi.fn().mockResolvedValue(null) });
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/summary`)
+      .set('X-User-Id', USER_ID);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 503 when the LLM call fails', async () => {
+    const app = buildApp({}, {}, { summarize: vi.fn().mockRejectedValue(new AiUnavailableError()) });
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/summary`)
+      .set('X-User-Id', USER_ID);
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('AI_UNAVAILABLE');
+  });
+
+  it('returns 401 without an X-User-Id header', async () => {
+    const app = buildApp();
+    const res = await request(app).post(`/incidents/${INC_ID}/summary`);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /incidents/:id/root-cause', () => {
+  it('generates and returns root-cause hypotheses', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/root-cause`)
+      .set('X-User-Id', USER_ID);
+    expect(res.status).toBe(200);
+    expect(res.body.aiRootCause).toEqual(['Cause A', 'Cause B']);
+    expect(res.body.aiRootCauseGeneratedAt).toBeDefined();
+  });
+
+  it('returns 404 for a missing incident', async () => {
+    const app = buildApp({ findById: vi.fn().mockResolvedValue(null) });
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/root-cause`)
+      .set('X-User-Id', USER_ID);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 503 when the LLM call fails', async () => {
+    const app = buildApp({}, {}, { suggestRootCause: vi.fn().mockRejectedValue(new AiUnavailableError()) });
+    const res = await request(app)
+      .post(`/incidents/${INC_ID}/root-cause`)
+      .set('X-User-Id', USER_ID);
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('AI_UNAVAILABLE');
+  });
+
+  it('returns 401 without an X-User-Id header', async () => {
+    const app = buildApp();
+    const res = await request(app).post(`/incidents/${INC_ID}/root-cause`);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /incidents/intake', () => {
+  it('returns a parsed draft without creating an incident', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/incidents/intake')
+      .set('X-User-Id', USER_ID)
+      .send({ text: 'Nightly DB refresh failed in prod, customers cannot see balances' });
+    expect(res.status).toBe(200);
+    expect(res.body.parsed).toEqual({
+      title: 'DB refresh failed overnight',
+      description: 'The nightly refresh job failed, balances are stale',
+      severity: 'High',
+      targetGroupId: GROUP_ID,
+      targetGroupName: 'DBA',
+    });
+  });
+
+  it('returns 400 when text is too short', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/incidents/intake')
+      .set('X-User-Id', USER_ID)
+      .send({ text: 'too short' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 422 when the LLM output fails parsing/validation', async () => {
+    const app = buildApp({}, {}, { parseIntake: vi.fn().mockRejectedValue(new ParseFailedError()) });
+    const res = await request(app)
+      .post('/incidents/intake')
+      .set('X-User-Id', USER_ID)
+      .send({ text: 'Nightly DB refresh failed in prod, customers cannot see balances' });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('PARSE_FAILED');
+  });
+
+  it('returns 503 when the LLM call fails', async () => {
+    const app = buildApp({}, {}, { parseIntake: vi.fn().mockRejectedValue(new AiUnavailableError()) });
+    const res = await request(app)
+      .post('/incidents/intake')
+      .set('X-User-Id', USER_ID)
+      .send({ text: 'Nightly DB refresh failed in prod, customers cannot see balances' });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('AI_UNAVAILABLE');
+  });
+
+  it('returns 401 without an X-User-Id header', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/incidents/intake')
+      .send({ text: 'Nightly DB refresh failed in prod, customers cannot see balances' });
+    expect(res.status).toBe(401);
   });
 });
 

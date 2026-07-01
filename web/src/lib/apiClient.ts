@@ -14,7 +14,8 @@ class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
-    message: string
+    message: string,
+    public readonly details?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'ApiError';
@@ -34,7 +35,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: { code: 'UNKNOWN', message: res.statusText } }));
     const err = body?.error ?? {};
-    throw new ApiError(res.status, err.code ?? 'UNKNOWN', err.message ?? res.statusText);
+    throw new ApiError(res.status, err.code ?? 'UNKNOWN', err.message ?? res.statusText, err.details);
   }
 
   return res.json();

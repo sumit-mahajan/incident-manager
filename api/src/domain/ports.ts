@@ -10,6 +10,7 @@ import type {
   Paginated,
   UpdateableIncidentFields,
   AiCachePatch,
+  Severity,
 } from './types';
 
 export interface UserRepository {
@@ -36,4 +37,15 @@ export interface IncidentRepository {
 export interface CommentRepository {
   create(input: NewComment): Promise<IncidentComment>;
   findByIncidentId(incidentId: string): Promise<IncidentComment[]>;
+}
+
+export interface LlmClient {
+  // groups carry { groupId, name, description } so routing can match domain scope, not just name
+  suggestSeverityAndRouting(description: string, groups: Group[]): Promise<{ severity: Severity; targetGroupId: string }>;
+  summarize(incident: Incident, targetGroupName: string): Promise<string>;
+  suggestRootCause(incident: Incident, targetGroupName: string): Promise<string[]>;
+  parseIntake(
+    text: string,
+    groups: Group[]
+  ): Promise<{ title: string; description: string; severity: Severity; targetGroupId: string }>;
 }

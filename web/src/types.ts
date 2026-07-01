@@ -40,3 +40,17 @@ export interface Paginated<T> {
   page: number;
   limit: number;
 }
+
+export interface IncidentSuggestion {
+  severity: Severity;
+  targetGroupId: string;
+  targetGroupName: string;
+}
+
+export interface IncidentDraft {
+  title: string;
+  description: string;
+  severity: Severity;
+  targetGroupId: string;
+  targetGroupName: string;
+}
