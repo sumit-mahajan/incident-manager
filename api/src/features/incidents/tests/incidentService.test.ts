@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { IncidentService } from './incidentService';
-import type { IncidentRepository, GroupRepository, LlmClient, CommentRepository } from '../../domain/ports';
-import type { Incident, IncidentComment, Group, CurrentUser } from '../../domain/types';
-import { NotFoundError, ForbiddenError, IllegalTransitionError, ValidationError, AiUnavailableError, ParseFailedError } from '../../domain/errors';
+import { IncidentService } from '../incidentService';
+import type { IncidentRepository, GroupRepository, LlmClient, CommentRepository } from '../../../domain/ports';
+import type { Incident, IncidentComment, Group, CurrentUser } from '../../../domain/types';
+import { NotFoundError, ForbiddenError, IllegalTransitionError, ValidationError, AiUnavailableError, ParseFailedError } from '../../../domain/errors';
 
 const GROUP_ID = '00000000-0000-0000-0000-000000000001';
 const INC_ID = '00000000-0000-0000-0000-000000000010';

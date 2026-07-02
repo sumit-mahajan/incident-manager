@@ -1,5 +1,6 @@
 import type {
   User,
+  UserWithGroups,
   Group,
   Incident,
   IncidentComment,
@@ -15,7 +16,7 @@ import type {
 
 export interface UserRepository {
   findById(id: string): Promise<User | null>;
-  findAll(): Promise<User[]>;
+  findAll(): Promise<UserWithGroups[]>;
   findGroupsByUserId(userId: string): Promise<Group[]>;
 }
 

@@ -57,7 +57,11 @@ function UserSwitcher() {
               }`}
             >
               {user.name}
-              <span className="block text-xs text-muted">{user.email}</span>
+              <span className="block text-xs text-muted">
+                {user.groups && user.groups.length > 0
+                  ? user.groups.map((g) => g.name).join(', ')
+                  : 'No group'}
+              </span>
             </button>
           ))}
         </div>
@@ -74,21 +78,6 @@ export function Navbar() {
           <AlertCircle size={20} className="text-accent" />
           IncidentHub
         </Link>
-
-        <div className="flex items-center gap-1">
-          <NavLink
-            to="/incidents"
-            className={({ isActive }) =>
-              `px-3 py-1.5 rounded-md text-sm transition-colors ${
-                isActive
-                  ? 'bg-accent/10 text-accent font-medium'
-                  : 'text-muted hover:text-foreground hover:bg-background'
-              }`
-            }
-          >
-            Incidents
-          </NavLink>
-        </div>
 
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />

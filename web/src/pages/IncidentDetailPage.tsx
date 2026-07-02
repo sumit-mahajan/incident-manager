@@ -1,8 +1,8 @@
 import { useParams, Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft, User, Calendar, Tag, Sparkles, RefreshCw, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
-import { SeverityBadge, StatusBadge } from '../components/Badge';
+import { SeverityBadge } from '../components/Badge';
 import { StatusTracker } from '../components/StatusTracker';
 import {
   useIncident,
@@ -60,6 +60,8 @@ export function IncidentDetailPage() {
   const addComment = useAddComment(id!);
   const [commentBody, setCommentBody] = useState('');
 
+  const usersById = useMemo(() => new Map(users.map((u) => [u.userId, u])), [users]);
+
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-8">
@@ -94,8 +96,8 @@ export function IncidentDetailPage() {
 
   const transitions = ALLOWED_TRANSITIONS[incident.status];
 
-  const reporter = users.find((u) => u.userId === incident.reporterId);
-  const assignee = users.find((u) => u.userId === incident.assigneeId);
+  const reporter = usersById.get(incident.reporterId);
+  const assignee = incident.assigneeId ? usersById.get(incident.assigneeId) : undefined;
   const targetGroup = groups.find((g) => g.groupId === incident.targetGroupId);
 
   function handleStatusUpdate(newStatus: Status) {
@@ -152,21 +154,136 @@ export function IncidentDetailPage() {
         Back to incidents
       </Link>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main content */}
-        <div className="lg:col-span-2 space-y-5">
-          <div className="bg-surface border border-surface-border rounded-lg p-6">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs font-mono text-muted">{incident.key}</span>
-              <SeverityBadge severity={incident.severity} />
-              <StatusBadge status={incident.status} />
+      <div
+        className="grid grid-cols-1 lg:grid-cols-3 gap-6
+          [grid-template-areas:'header'_'dates'_'status'_'assignment'_'meta'_'summary'_'rootcause'_'comments']
+          lg:[grid-template-areas:'header_header_status'_'dates_dates_status'_'summary_summary_assignment'_'rootcause_rootcause_meta'_'comments_comments_comments']"
+      >
+        <div className="[grid-area:header] bg-surface border border-surface-border rounded-lg p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs font-mono text-muted">{incident.key}</span>
+            <SeverityBadge severity={incident.severity} />
+          </div>
+          <h1 className="text-xl font-semibold text-foreground mb-3">{incident.title}</h1>
+          <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{incident.description}</p>
+        </div>
+
+        {/* Timestamps */}
+        <div className="[grid-area:dates] bg-surface border border-surface-border rounded-lg p-4 text-sm text-muted space-y-1.5">
+          <div className="flex items-center gap-2">
+            <Calendar size={13} />
+            <span>Created {formatDate(incident.createdAt)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Calendar size={13} />
+            <span>Updated {formatDate(incident.updatedAt)}</span>
+          </div>
+          {incident.resolvedAt && (
+            <div className="flex items-center gap-2">
+              <Calendar size={13} />
+              <span>Resolved {formatDate(incident.resolvedAt)}</span>
             </div>
-            <h1 className="text-xl font-semibold text-foreground mb-3">{incident.title}</h1>
-            <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">{incident.description}</p>
+          )}
+        </div>
+
+        {/* Status machine */}
+        <div className="[grid-area:status] bg-surface border border-surface-border rounded-lg p-4">
+          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Status</p>
+          <StatusTracker current={incident.status} className="mb-3" />
+
+          {transitions.length > 0 && (
+            <div className="space-y-2">
+              {canUpdateStatus ? (
+                transitions.map((next) => {
+                  const blockedByAssignment = next === 'InProgress' && !incident.assigneeId;
+                  return (
+                    <div key={next}>
+                      <button
+                        onClick={() => handleStatusUpdate(next)}
+                        disabled={updateStatus.isPending || blockedByAssignment}
+                        className="w-full px-3 py-2 text-sm bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {next === 'Resolved'
+                          ? 'Resolve'
+                          : next === 'Closed'
+                          ? 'Close'
+                          : next === 'InProgress'
+                          ? incident.status === 'Open'
+                            ? 'Start Work'
+                            : 'Reopen'
+                          : STATUS_LABELS[next]}
+                      </button>
+                      {blockedByAssignment && (
+                        <p className="mt-1 text-xs text-muted italic">
+                          Self-assign before moving to In Progress.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-xs text-muted italic">
+                  Only the assignee or group members can update status.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Assignment */}
+        <div className="[grid-area:assignment] bg-surface border border-surface-border rounded-lg p-4">
+          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Assignment</p>
+
+          <div className="flex items-center gap-2 mb-3">
+            <User size={14} className="text-muted" />
+            <span className="text-sm text-foreground">
+              {assignee ? assignee.name : <span className="text-muted italic">Unassigned</span>}
+            </span>
           </div>
 
-          {/* AI Summary */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4">
+          {!isAlreadyAssignedToMe && isTargetGroupMember && activeUserId && (
+            <button
+              onClick={handleSelfAssign}
+              disabled={updateAssignee.isPending}
+              className="w-full px-3 py-2 text-sm border border-accent text-accent rounded-md hover:bg-accent/10 transition-colors disabled:opacity-60"
+            >
+              Self-assign
+            </button>
+          )}
+          {isAlreadyAssignedToMe && (
+            <span className="text-xs text-accent font-medium">You are the assignee</span>
+          )}
+          {!isTargetGroupMember && !isAssignee && (
+            <p className="text-xs text-muted italic">
+              Only target group members can self-assign.
+            </p>
+          )}
+        </div>
+
+        {/* Meta */}
+        <div className="[grid-area:meta] bg-surface border border-surface-border rounded-lg p-4 space-y-3 text-sm">
+          <div>
+            <p className="text-xs text-muted uppercase tracking-wide mb-1">Reporter</p>
+            <div className="flex items-center gap-1.5">
+              <User size={13} className="text-muted" />
+              <span className="text-foreground">{reporter ? reporter.name : '—'}</span>
+              {isReporter && <span className="text-xs text-accent">(you)</span>}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted uppercase tracking-wide mb-1">Target group</p>
+            <div className="flex items-center gap-1.5">
+              <Tag size={13} className="text-muted" />
+              <span className="text-foreground">{targetGroup ? targetGroup.name : '—'}</span>
+              {isTargetGroupMember && (
+                <span className="text-xs text-accent">(member)</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* AI Summary */}
+        <div className="[grid-area:summary] bg-surface border border-surface-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-medium text-muted uppercase tracking-wide">AI Summary</p>
               <button
@@ -196,7 +313,7 @@ export function IncidentDetailPage() {
           </div>
 
           {/* AI Root Cause */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4">
+          <div className="[grid-area:rootcause] bg-surface border border-surface-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-medium text-muted uppercase tracking-wide">AI Root-Cause Hypotheses</p>
               <button
@@ -234,32 +351,14 @@ export function IncidentDetailPage() {
             )}
           </div>
 
-          {/* Timestamps */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4 text-sm text-muted space-y-1.5">
-            <div className="flex items-center gap-2">
-              <Calendar size={13} />
-              <span>Created {formatDate(incident.createdAt)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Calendar size={13} />
-              <span>Updated {formatDate(incident.updatedAt)}</span>
-            </div>
-            {incident.resolvedAt && (
-              <div className="flex items-center gap-2">
-                <Calendar size={13} />
-                <span>Resolved {formatDate(incident.resolvedAt)}</span>
-              </div>
-            )}
-          </div>
-
           {/* Comments */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4">
+          <div className="[grid-area:comments] bg-surface border border-surface-border rounded-lg p-4">
             <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Comments</p>
 
             {comments.length > 0 ? (
               <ul className="space-y-3 mb-4">
                 {comments.map((comment) => {
-                  const author = users.find((u) => u.userId === comment.authorId);
+                  const author = usersById.get(comment.authorId);
                   return (
                     <li key={comment.commentId} className="border-b border-surface-border last:border-0 pb-3 last:pb-0">
                       <div className="flex items-center gap-2 mb-1">
@@ -304,106 +403,6 @@ export function IncidentDetailPage() {
               </p>
             )}
           </div>
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-4">
-          {/* Status machine */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4">
-            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Status</p>
-            <StatusTracker current={incident.status} className="mb-3" />
-
-            {transitions.length > 0 && (
-              <div className="space-y-2">
-                {canUpdateStatus ? (
-                  transitions.map((next) => {
-                    const blockedByAssignment = next === 'InProgress' && !incident.assigneeId;
-                    return (
-                      <div key={next}>
-                        <button
-                          onClick={() => handleStatusUpdate(next)}
-                          disabled={updateStatus.isPending || blockedByAssignment}
-                          className="w-full px-3 py-2 text-sm bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {next === 'Resolved'
-                            ? 'Resolve'
-                            : next === 'Closed'
-                            ? 'Close'
-                            : next === 'InProgress'
-                            ? incident.status === 'Open'
-                              ? 'Start Work'
-                              : 'Reopen'
-                            : STATUS_LABELS[next]}
-                        </button>
-                        {blockedByAssignment && (
-                          <p className="mt-1 text-xs text-muted italic">
-                            Self-assign before moving to In Progress.
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-xs text-muted italic">
-                    Only the assignee or group members can update status.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Assignment */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4">
-            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Assignment</p>
-
-            <div className="flex items-center gap-2 mb-3">
-              <User size={14} className="text-muted" />
-              <span className="text-sm text-foreground">
-                {assignee ? assignee.name : <span className="text-muted italic">Unassigned</span>}
-              </span>
-            </div>
-
-            {!isAlreadyAssignedToMe && isTargetGroupMember && activeUserId && (
-              <button
-                onClick={handleSelfAssign}
-                disabled={updateAssignee.isPending}
-                className="w-full px-3 py-2 text-sm border border-accent text-accent rounded-md hover:bg-accent/10 transition-colors disabled:opacity-60"
-              >
-                Self-assign
-              </button>
-            )}
-            {isAlreadyAssignedToMe && (
-              <span className="text-xs text-accent font-medium">You are the assignee</span>
-            )}
-            {!isTargetGroupMember && !isAssignee && (
-              <p className="text-xs text-muted italic">
-                Only target group members can self-assign.
-              </p>
-            )}
-          </div>
-
-          {/* Meta */}
-          <div className="bg-surface border border-surface-border rounded-lg p-4 space-y-3 text-sm">
-            <div>
-              <p className="text-xs text-muted uppercase tracking-wide mb-1">Reporter</p>
-              <div className="flex items-center gap-1.5">
-                <User size={13} className="text-muted" />
-                <span className="text-foreground">{reporter ? reporter.name : '—'}</span>
-                {isReporter && <span className="text-xs text-accent">(you)</span>}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-muted uppercase tracking-wide mb-1">Target group</p>
-              <div className="flex items-center gap-1.5">
-                <Tag size={13} className="text-muted" />
-                <span className="text-foreground">{targetGroup ? targetGroup.name : '—'}</span>
-                {isTargetGroupMember && (
-                  <span className="text-xs text-accent">(member)</span>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

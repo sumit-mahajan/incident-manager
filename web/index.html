@@ -19,8 +19,7 @@
     <script>
       (function () {
         var stored = localStorage.getItem('incidenthub-theme');
-        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        if (stored === 'dark' || (!stored && prefersDark)) {
+        if (stored === 'dark') {
           document.documentElement.classList.add('dark');
         }
       })();

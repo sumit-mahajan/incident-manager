@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { DbClient } from '../db/client';
 import type { UserRepository } from '../domain/ports';
-import type { User, Group } from '../domain/types';
+import type { User, UserWithGroups, Group } from '../domain/types';
 import { users, groups, userGroups } from '../db/schema';
 
 export class DrizzleUserRepository implements UserRepository {
@@ -12,8 +12,34 @@ export class DrizzleUserRepository implements UserRepository {
     return rows[0] ?? null;
   }
 
-  async findAll(): Promise<User[]> {
-    return this.db.select().from(users).orderBy(users.name);
+  async findAll(): Promise<UserWithGroups[]> {
+    const allUsers = await this.db.select().from(users).orderBy(users.name);
+
+    const membershipRows = await this.db
+      .select({
+        userId: userGroups.userId,
+        groupId: groups.groupId,
+        name: groups.name,
+        description: groups.description,
+        createdAt: groups.createdAt,
+      })
+      .from(userGroups)
+      .innerJoin(groups, eq(userGroups.groupId, groups.groupId));
+
+    const groupsByUserId = new Map<string, Group[]>();
+    for (const row of membershipRows) {
+      const group: Group = {
+        groupId: row.groupId,
+        name: row.name,
+        description: row.description,
+        createdAt: row.createdAt,
+      };
+      const existing = groupsByUserId.get(row.userId);
+      if (existing) existing.push(group);
+      else groupsByUserId.set(row.userId, [group]);
+    }
+
+    return allUsers.map((user) => ({ ...user, groups: groupsByUserId.get(user.userId) ?? [] }));
   }
 
   async findGroupsByUserId(userId: string): Promise<Group[]> {

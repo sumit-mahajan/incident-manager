@@ -86,6 +86,7 @@ describe('IncidentListPage', () => {
     fireEvent.change(screen.getByPlaceholderText(/Search title or description/i), {
       target: { value: 'db' },
     });
+    fireEvent.click(screen.getByText('Search'));
     expect(screen.getByText('Clear')).toBeInTheDocument();
   });
 });

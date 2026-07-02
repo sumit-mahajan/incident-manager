@@ -12,8 +12,14 @@ vi.mock('../features/incidents/hooks', async () => {
 });
 
 const users = [
-  { userId: 'user-1', name: 'Alice', email: 'alice@x.com', createdAt: '' },
-  { userId: 'user-2', name: 'Bob', email: 'bob@x.com', createdAt: '' },
+  {
+    userId: 'user-1',
+    name: 'Alice',
+    email: 'alice@x.com',
+    createdAt: '',
+    groups: [{ groupId: 'group-1', name: 'DBA', description: '', createdAt: '' }],
+  },
+  { userId: 'user-2', name: 'Bob', email: 'bob@x.com', createdAt: '', groups: [] },
 ];
 
 describe('Navbar user switcher', () => {
@@ -33,6 +39,19 @@ describe('Navbar user switcher', () => {
     fireEvent.click(screen.getByText('Select user'));
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
+  });
+
+  it('shows each user\'s group in the dropdown instead of their email', () => {
+    renderWithProviders(<Navbar />);
+    fireEvent.click(screen.getByText('Select user'));
+    expect(screen.getByText('DBA')).toBeInTheDocument();
+    expect(screen.queryByText('alice@x.com')).not.toBeInTheDocument();
+  });
+
+  it('shows a fallback when a user has no group', () => {
+    renderWithProviders(<Navbar />);
+    fireEvent.click(screen.getByText('Select user'));
+    expect(screen.getByText('No group')).toBeInTheDocument();
   });
 
   it('sets the active user and persists it when one is chosen', () => {

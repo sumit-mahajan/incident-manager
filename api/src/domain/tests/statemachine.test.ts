@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { validateTransition } from './statemachine';
-import { IllegalTransitionError } from './errors';
+import { validateTransition } from '../statemachine';
+import { IllegalTransitionError } from '../errors';
 
 describe('validateTransition — legal transitions', () => {
   it('Open → InProgress', () => {

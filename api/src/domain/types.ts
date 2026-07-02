@@ -21,6 +21,10 @@ export interface Group {
   createdAt: Date;
 }
 
+export interface UserWithGroups extends User {
+  groups: Group[];
+}
+
 export interface Incident {
   incidentId: string;
   key: string;

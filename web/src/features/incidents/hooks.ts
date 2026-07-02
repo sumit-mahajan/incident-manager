@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { incidentService, userService, groupService, type IncidentFilters } from './services';
 import { ApiError } from '../../lib/apiClient';
+import type { Incident } from '../../types';
 
 export function errorMessage(err: unknown, fallback: string): string {
   if (!(err instanceof ApiError)) return fallback;
@@ -42,12 +43,23 @@ export function useUpdateStatus(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (status: string) => incidentService.updateStatus(id, status),
-    onSuccess: () => {
+    onMutate: async (status: string) => {
+      await qc.cancelQueries({ queryKey: ['incident', id] });
+      const previousIncident = qc.getQueryData<Incident>(['incident', id]);
+      if (previousIncident) {
+        qc.setQueryData<Incident>(['incident', id], { ...previousIncident, status: status as Incident['status'] });
+      }
+      return { previousIncident };
+    },
+    onError: (err, _status, context) => {
+      if (context?.previousIncident) {
+        qc.setQueryData(['incident', id], context.previousIncident);
+      }
+      toast.error(errorMessage(err, 'Failed to update status'));
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['incident', id] });
       qc.invalidateQueries({ queryKey: ['incidents'] });
-    },
-    onError: (err) => {
-      toast.error(errorMessage(err, 'Failed to update status'));
     },
   });
 }

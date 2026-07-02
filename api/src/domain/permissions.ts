@@ -13,9 +13,5 @@ export function canEditFields(currentUser: CurrentUser, incident: Incident, isTa
 }
 
 export function canComment(currentUser: CurrentUser, incident: Incident, isTargetGroupMember: boolean): boolean {
-  return (
-    incident.reporterId === currentUser.userId ||
-    incident.assigneeId === currentUser.userId ||
-    isTargetGroupMember
-  );
+  return incident.reporterId === currentUser.userId || incident.assigneeId === currentUser.userId || isTargetGroupMember;
 }

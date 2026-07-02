@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Plus, Filter } from 'lucide-react';
 import { useIncidents, useGroups } from '../features/incidents/hooks';
@@ -15,6 +15,13 @@ const STATUS_LABELS: Record<Status, string> = {
 };
 
 export function IncidentListPage() {
+  // Draft filter values, edited freely and only applied together on Search submit.
+  const [qInput, setQInput] = useState('');
+  const [severityInput, setSeverityInput] = useState('');
+  const [statusInput, setStatusInput] = useState('');
+  const [groupInput, setGroupInput] = useState('');
+
+  // Applied filters, used for the actual query.
   const [q, setQ] = useState('');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
@@ -35,10 +42,23 @@ export function IncidentListPage() {
   const totalPages = data ? Math.ceil(data.total / data.limit) : 1;
 
   function resetFilters() {
+    setQInput('');
+    setSeverityInput('');
+    setStatusInput('');
+    setGroupInput('');
     setQ('');
     setSeverity('');
     setStatus('');
     setGroup('');
+    setPage(1);
+  }
+
+  function handleSearchSubmit(e: FormEvent) {
+    e.preventDefault();
+    setQ(qInput);
+    setSeverity(severityInput);
+    setStatus(statusInput);
+    setGroup(groupInput);
     setPage(1);
   }
 
@@ -69,23 +89,23 @@ export function IncidentListPage() {
           <Filter size={14} />
           Filters
         </div>
-        <div className="flex flex-wrap gap-3">
+        <form onSubmit={handleSearchSubmit} className="flex flex-wrap gap-3">
           {/* Search */}
           <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               type="text"
               placeholder="Search title or description…"
-              value={q}
-              onChange={(e) => { setQ(e.target.value); setPage(1); }}
+              value={qInput}
+              onChange={(e) => setQInput(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground placeholder:text-muted focus:outline-none focus:border-accent"
             />
           </div>
 
           {/* Severity */}
           <select
-            value={severity}
-            onChange={(e) => { setSeverity(e.target.value); setPage(1); }}
+            value={severityInput}
+            onChange={(e) => setSeverityInput(e.target.value)}
             className="px-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground focus:outline-none focus:border-accent"
           >
             <option value="">All severities</option>
@@ -96,8 +116,8 @@ export function IncidentListPage() {
 
           {/* Status */}
           <select
-            value={status}
-            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+            value={statusInput}
+            onChange={(e) => setStatusInput(e.target.value)}
             className="px-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground focus:outline-none focus:border-accent"
           >
             <option value="">All statuses</option>
@@ -108,8 +128,8 @@ export function IncidentListPage() {
 
           {/* Group */}
           <select
-            value={group}
-            onChange={(e) => { setGroup(e.target.value); setPage(1); }}
+            value={groupInput}
+            onChange={(e) => setGroupInput(e.target.value)}
             className="px-3 py-2 text-sm bg-background border border-surface-border rounded-md text-foreground focus:outline-none focus:border-accent"
           >
             <option value="">All groups</option>
@@ -118,15 +138,23 @@ export function IncidentListPage() {
             ))}
           </select>
 
+          <button
+            type="submit"
+            className="px-3 py-2 text-sm bg-accent text-accent-foreground rounded-md hover:bg-accent-hover transition-colors"
+          >
+            Search
+          </button>
+
           {hasFilters && (
             <button
+              type="button"
               onClick={resetFilters}
               className="px-3 py-2 text-sm text-muted hover:text-foreground transition-colors"
             >
               Clear
             </button>
           )}
-        </div>
+        </form>
       </div>
 
       {/* List */}

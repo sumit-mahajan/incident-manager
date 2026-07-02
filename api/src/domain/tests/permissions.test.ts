@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { canSelfAssign, canUpdateStatus, canEditFields, canComment } from './permissions';
-import type { CurrentUser, Incident } from './types';
+import { canSelfAssign, canUpdateStatus, canEditFields, canComment } from '../permissions';
+import type { CurrentUser, Incident } from '../types';
 
 const makeUser = (id: string): CurrentUser => ({ userId: id, name: 'Test User', email: 'test@example.com' });
 

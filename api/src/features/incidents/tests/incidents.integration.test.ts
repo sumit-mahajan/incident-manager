@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '../../app';
-import { incidentRoutes } from './incidentRoutes';
-import { userRoutes } from '../users/userRoutes';
-import { groupRoutes } from '../groups/groupRoutes';
-import { resolveCurrentUser } from '../../middleware/auth';
-import { IncidentService } from './incidentService';
-import type { UserRepository, GroupRepository, IncidentRepository, LlmClient, CommentRepository } from '../../domain/ports';
-import type { Incident, IncidentComment, User, Group } from '../../domain/types';
-import { AiUnavailableError, ParseFailedError } from '../../domain/errors';
+import { createApp } from '../../../app';
+import { incidentRoutes } from '../incidentRoutes';
+import { userRoutes } from '../../users/userRoutes';
+import { groupRoutes } from '../../groups/groupRoutes';
+import { resolveCurrentUser } from '../../../middleware/auth';
+import { IncidentService } from '../incidentService';
+import type { UserRepository, GroupRepository, IncidentRepository, LlmClient, CommentRepository } from '../../../domain/ports';
+import type { Incident, IncidentComment, User, Group } from '../../../domain/types';
+import { AiUnavailableError, ParseFailedError } from '../../../domain/errors';
 
 const GROUP_ID = '00000000-0000-0000-0000-000000000001';
 const INC_ID = '00000000-0000-0000-0000-000000000010';
@@ -61,11 +61,13 @@ function buildApp(
   groupOverrides: Partial<GroupRepository> = {},
   llmOverrides: Partial<LlmClient> = {},
   commentOverrides: Partial<CommentRepository> = {},
+  userOverrides: Partial<UserRepository> = {},
 ) {
   const userRepo: UserRepository = {
     findById: vi.fn().mockResolvedValue(seedUser),
-    findAll: vi.fn().mockResolvedValue([seedUser]),
+    findAll: vi.fn().mockResolvedValue([{ ...seedUser, groups: [seedGroup] }]),
     findGroupsByUserId: vi.fn().mockResolvedValue([seedGroup]),
+    ...userOverrides,
   };
 
   const groupRepo: GroupRepository = {
@@ -132,41 +134,7 @@ describe('Auth middleware', () => {
   });
 
   it('returns 401 when X-User-Id references an unknown user', async () => {
-    const userRepo: UserRepository = {
-      findById: vi.fn().mockResolvedValue(null),
-      findAll: vi.fn().mockResolvedValue([]),
-      findGroupsByUserId: vi.fn().mockResolvedValue([]),
-    };
-    const groupRepo: GroupRepository = {
-      findAll: vi.fn().mockResolvedValue([]),
-      findById: vi.fn().mockResolvedValue(null),
-      isMember: vi.fn().mockResolvedValue(false),
-    };
-    const incidentRepo: IncidentRepository = {
-      nextKey: vi.fn(),
-      create: vi.fn(),
-      findById: vi.fn(),
-      findMany: vi.fn(),
-      update: vi.fn(),
-      updateAiCache: vi.fn(),
-    };
-    const llmClient: LlmClient = {
-      suggestSeverityAndRouting: vi.fn(),
-      summarize: vi.fn(),
-      suggestRootCause: vi.fn(),
-      parseIntake: vi.fn(),
-    };
-    const commentRepo: CommentRepository = {
-      create: vi.fn(),
-      findByIncidentId: vi.fn(),
-    };
-    const auth = resolveCurrentUser(userRepo);
-    const svc = new IncidentService(incidentRepo, groupRepo, llmClient, commentRepo);
-    const app = createApp({
-      incidents: incidentRoutes(svc, auth),
-      users: userRoutes(userRepo),
-      groups: groupRoutes(groupRepo),
-    });
+    const app = buildApp({}, {}, {}, {}, { findById: vi.fn().mockResolvedValue(null) });
     const res = await request(app).post('/incidents').set('X-User-Id', 'nonexistent').send({});
     expect(res.status).toBe(401);
   });
@@ -540,5 +508,17 @@ describe('POST /incidents/:id/comments', () => {
       .post(`/incidents/${INC_ID}/comments`)
       .send({ body: 'Working on it now.' });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /users', () => {
+  it('returns users with their groups embedded', async () => {
+    const app = buildApp();
+    const res = await request(app).get('/users');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].userId).toBe(USER_ID);
+    expect(res.body[0].groups).toHaveLength(1);
+    expect(res.body[0].groups[0].groupId).toBe(GROUP_ID);
   });
 });
