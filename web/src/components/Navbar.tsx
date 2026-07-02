@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { ChevronDown, AlertCircle, User } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { useUserStore } from '../features/auth/UserStoreProvider';
